@@ -1,0 +1,16 @@
+# Python environments and generated files
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.gitdata/
+
+# Local configuration and application data
+.env
+geo.db
+geo.db-*
+
+# Editor and operating-system files
+.DS_Store
+.vscode/
+.idea/

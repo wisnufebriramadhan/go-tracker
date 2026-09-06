@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Geo Tracker — Dashboard</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <h1 class="brand">📍 Geo Tracker</h1>
+      <p class="tagline">Live GPS, IP &amp; phone lookup in one dashboard</p>
+
+      <!-- Stats Panel -->
+      <div class="panel stats-panel">
+        <h2>Statistics</h2>
+        <div id="stats-content" class="stats-content">
+          <div class="stat-item">
+            <span class="stat-value" id="stat-total">-</span>
+            <span class="stat-label">Total Sessions</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value" id="stat-active">-</span>
+            <span class="stat-label">Active</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value" id="stat-points">-</span>
+            <span class="stat-label">Data Points</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel create-panel">
+        <h2>Create share link</h2>
+        <form id="create-form">
+          <input type="text" id="session-name" placeholder="Name (e.g. My Phone)" maxlength="100">
+          <div class="ttl-row">
+            <label for="session-ttl">Auto-delete after:</label>
+            <select id="session-ttl">
+              <option value="0">Never</option>
+              <option value="1">1 hour</option>
+              <option value="6">6 hours</option>
+              <option value="24" selected>24 hours</option>
+              <option value="72">3 days</option>
+              <option value="168">7 days</option>
+            </select>
+          </div>
+          <button type="submit" class="btn primary">+ Create link</button>
+        </form>
+        <p class="hint">Open the link on any device to start sharing its live location.</p>
+      </div>
+
+      <div class="panel sessions-panel">
+        <h2>Sessions</h2>
+        <div id="session-list" class="session-list"></div>
+      </div>
+    </aside>
+
+    <!-- Main area -->
+    <main class="main">
+      <nav class="tabs">
+        <button class="tab active" data-tab="live">Live GPS</button>
+        <button class="tab" data-tab="ip">IP Lookup</button>
+        <button class="tab" data-tab="phone">Phone Lookup</button>
+      </nav>
+
+      <section id="tab-live" class="tab-content active">
+        <div id="map"></div>
+        <div class="map-status" id="map-status">Loading map…</div>
+      </section>
+
+      <section id="tab-ip" class="tab-content">
+        <div class="lookup-card">
+          <h2>IP Geolocation</h2>
+          <form id="ip-form">
+            <input type="text" id="ip-input" placeholder="e.g. 8.8.8.8" required>
+            <button type="submit" class="btn primary">Lookup</button>
+          </form>
+          <div id="ip-result" class="result"></div>
+        </div>
+      </section>
+
+      <section id="tab-phone" class="tab-content">
+        <div class="lookup-card">
+          <h2>Phone Number Info</h2>
+          <form id="phone-form">
+            <input type="text" id="phone-input" placeholder="e.g. +6281234567890" required>
+            <button type="submit" class="btn primary">Lookup</button>
+          </form>
+          <div id="phone-result" class="result"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
