@@ -237,6 +237,11 @@ select {
   margin-top: 16px;
 }
 
+.photo-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; max-height: 55vh; overflow: auto; color: var(--muted); }
+.photo-item { margin: 0; }
+.photo-item img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
+.photo-item figcaption { margin-top: 4px; font-size: .75rem; color: var(--muted); }
+
 .modal-actions .btn {
   flex: 1;
 }

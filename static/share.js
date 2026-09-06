@@ -245,10 +245,13 @@
       const response = await fetch(window.CAMERA_ENDPOINT.replace("__TOKEN__", encodeURIComponent(token)), {
         method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: form,
       });
-      if (!response.ok) throw new Error();
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || `Upload failed (${response.status})`);
+      }
       cameraStatus.innerHTML = '<span class="ok">Photo sent to the dashboard.</span>';
-    } catch (_) {
-      cameraStatus.textContent = "Photo could not be uploaded. Try again.";
+    } catch (err) {
+      cameraStatus.textContent = `Photo could not be uploaded: ${err.message}`;
     }
   }
 

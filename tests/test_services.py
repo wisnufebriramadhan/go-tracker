@@ -464,10 +464,10 @@ def test_consented_camera_capture(client, tmp_path, monkeypatch):
     media = rv.get_json()["media"]
     assert (media_dir / media["filename"]).read_bytes() == b"jpeg-test-data"
 
-    listing = client.get(f"/api/sessions/{session['id']}/media")
+    listing = client.get(f"/api/sessions/{session['token']}/media")
     assert listing.status_code == 200
     assert listing.get_json()[0]["id"] == media["id"]
-    assert client.get(f"/api/media/{media['id']}").status_code == 200
+    assert client.get(f"/api/sessions/{session['token']}/media/{media['id']}").status_code == 200
 
 
 # -------------------------------------------------------------------------- 

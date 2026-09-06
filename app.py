@@ -393,19 +393,21 @@ def upload_camera_capture(token):
     return jsonify({"ok": True, "media": media}), 201
 
 
-@app.route("/api/sessions/<int:session_id>/media")
+@app.route("/api/sessions/<token>/media", methods=["GET"])
 @rate_limit
-def session_media(session_id):
-    if db.get_session_by_id(session_id) is None:
+def session_media(token):
+    session = db.get_session_by_token(token)
+    if session is None:
         return jsonify({"error": "Session not found"}), 404
-    return jsonify(db.list_media(session_id))
+    return jsonify(db.list_media(session["id"]))
 
 
-@app.route("/api/media/<int:media_id>")
+@app.route("/api/sessions/<token>/media/<int:media_id>")
 @rate_limit
-def get_media_file(media_id):
+def get_media_file(token, media_id):
+    session = db.get_session_by_token(token)
     media = db.get_media(media_id)
-    if media is None:
+    if media is None or session is None or media["session_id"] != session["id"]:
         abort(404)
     return send_from_directory(MEDIA_DIR, media["filename"], mimetype=media["content_type"])
 

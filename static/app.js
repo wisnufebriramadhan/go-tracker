@@ -190,6 +190,7 @@ function updateSessionCard(entry) {
         ${s.paused ? '▶ Resume' : '⏸ Pause'}
       </button>
       <button class="btn small export-btn" data-id="${s.id}">Export</button>
+      <button class="btn small photos-btn" data-token="${esc(s.token)}" data-name="${esc(s.name)}">Photos</button>
       <button class="btn small danger del-btn" data-id="${s.id}">Delete</button>
     </div>`;
 
@@ -217,6 +218,11 @@ function updateSessionCard(entry) {
   entry.card.querySelector(".export-btn").addEventListener("click", (ev) => {
     ev.stopPropagation();
     showExportModal(s.id, s.name);
+  });
+
+  entry.card.querySelector(".photos-btn").addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    showPhotoGallery(s.token, s.name);
   });
 
   entry.card.querySelector(".del-btn").addEventListener("click", async (ev) => {
@@ -348,6 +354,32 @@ function downloadExport(sessionId, format) {
   a.click();
   document.body.removeChild(a);
   toast(`Exporting as ${format.toUpperCase()}...`);
+}
+
+async function showPhotoGallery(token, sessionName) {
+  const existing = document.querySelector('.modal-overlay');
+  if (existing) existing.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal"><h3>Photos — ${esc(sessionName)}</h3><div class="photo-gallery">Loading photos…</div><div class="modal-actions"><button class="btn cancel-btn">Close</button></div></div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('.cancel-btn').addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (event) => { if (event.target === overlay) overlay.remove(); });
+  const gallery = overlay.querySelector('.photo-gallery');
+  try {
+    const photos = await api(`/api/sessions/${encodeURIComponent(token)}/media`);
+    if (!photos.length) {
+      gallery.textContent = 'No consented camera photos yet.';
+      return;
+    }
+    gallery.innerHTML = photos.map((photo) => `
+      <figure class="photo-item">
+        <img src="/api/sessions/${encodeURIComponent(token)}/media/${photo.id}" alt="Camera capture" loading="lazy">
+        <figcaption>${esc(fmtTime(photo.created_at))}</figcaption>
+      </figure>`).join('');
+  } catch (err) {
+    gallery.textContent = `Could not load photos: ${err.message}`;
+  }
 }
 
 /* ------------------------------------------------------------------ */
