@@ -20,6 +20,13 @@
   let sendTimer = null;
   let lastSent = 0;
   const csrfToken = window.CSRF_TOKEN;
+  const cameraStartBtn = document.getElementById("camera-start-btn");
+  const cameraStopBtn = document.getElementById("camera-stop-btn");
+  const cameraCaptureBtn = document.getElementById("camera-capture-btn");
+  const cameraPreview = document.getElementById("camera-preview");
+  const cameraActions = document.getElementById("camera-actions");
+  const cameraStatus = document.getElementById("camera-status");
+  let cameraStream = null;
 
   function setStatus(html, cls) {
     statusEl.innerHTML = html;
@@ -192,8 +199,61 @@
     }
   }
 
+  function stopCamera() {
+    if (cameraStream) cameraStream.getTracks().forEach((track) => track.stop());
+    cameraStream = null;
+    cameraPreview.srcObject = null;
+    cameraPreview.hidden = true;
+    cameraActions.hidden = true;
+    cameraStartBtn.hidden = false;
+    cameraStatus.textContent = "Camera is off.";
+  }
+
+  async function startCamera() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      cameraStatus.textContent = "Camera access requires HTTPS and a supported browser.";
+      return;
+    }
+    try {
+      cameraStatus.textContent = "Requesting camera permission…";
+      cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+      cameraPreview.srcObject = cameraStream;
+      cameraPreview.hidden = false;
+      cameraActions.hidden = false;
+      cameraStartBtn.hidden = true;
+      cameraStatus.innerHTML = '<span class="pulse"></span><span class="ok">Camera is on. Preview stays on this device.</span>';
+    } catch (err) {
+      cameraStatus.textContent = "Camera permission was not granted.";
+    }
+  }
+
+  async function captureCameraPhoto() {
+    if (!cameraStream) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = cameraPreview.videoWidth;
+    canvas.height = cameraPreview.videoHeight;
+    canvas.getContext("2d").drawImage(cameraPreview, 0, 0);
+    cameraStatus.textContent = "Uploading photo…";
+    const photo = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+    if (!photo) return;
+    const form = new FormData();
+    form.append("photo", photo, "camera.jpg");
+    try {
+      const response = await fetch(window.CAMERA_ENDPOINT.replace("__TOKEN__", encodeURIComponent(token)), {
+        method: "POST", headers: { "X-CSRF-Token": csrfToken }, body: form,
+      });
+      if (!response.ok) throw new Error();
+      cameraStatus.innerHTML = '<span class="ok">Photo sent to the dashboard.</span>';
+    } catch (_) {
+      cameraStatus.textContent = "Photo could not be uploaded. Try again.";
+    }
+  }
+
   startBtn.addEventListener("click", start);
   stopBtn.addEventListener("click", stop);
+  cameraStartBtn?.addEventListener("click", startCamera);
+  cameraStopBtn?.addEventListener("click", stopCamera);
+  cameraCaptureBtn?.addEventListener("click", captureCameraPhoto);
 
   // The template may be shared across several page versions, so create the
   // tappable image here rather than requiring a template-specific element.
@@ -219,5 +279,6 @@
   window.addEventListener("pagehide", () => {
     if (watchId != null) navigator.geolocation.clearWatch(watchId);
     clearInterval(sendTimer);
+    stopCamera();
   });
 })();

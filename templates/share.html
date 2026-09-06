@@ -91,6 +91,9 @@
       border-radius: 8px;
       margin-bottom: 14px;
     }
+    .camera-preview { width: 100%; border-radius: 10px; margin: 12px 0; background: #111; }
+    .camera-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .camera-actions button { flex: 1; }
   </style>
 </head>
 <body>
@@ -120,6 +123,7 @@
           <ul style="margin: 8px 0 0 18px; padding: 0;">
             <li>Your browser will ask for permission to access your location.</li>
             <li>While sharing, your GPS position is sent to the Geo Tracker dashboard every 5 seconds.</li>
+            <li>Camera access is optional. A photo is uploaded only after you enable the camera and press Take photo.</li>
             <li>You control it — press <b>Stop sharing</b> at any time to disconnect.</li>
           </ul>
         </div>
@@ -135,6 +139,17 @@
           {% endif %}
         </div>
         <div id="coords" class="coords"></div>
+
+        <hr style="border-color:var(--border); margin:20px 0;">
+        <h2 style="font-size:1rem; margin:0 0 6px;">📷 Optional camera</h2>
+        <p class="session">Camera preview stays on this device until you choose <b>Take photo</b>.</p>
+        <button id="camera-start-btn" type="button" class="big-btn start">Enable camera</button>
+        <video id="camera-preview" class="camera-preview" autoplay playsinline muted hidden></video>
+        <div id="camera-actions" class="camera-actions" hidden>
+          <button id="camera-capture-btn" type="button" class="btn primary">Take photo</button>
+          <button id="camera-stop-btn" type="button" class="btn danger">Stop camera</button>
+        </div>
+        <div id="camera-status" class="status">Camera is off.</div>
       </div>
       <p class="footnote">This page only sends your location while you keep it open and sharing.<br>
         Powered by Geo Tracker — consent-based location sharing.</p>
@@ -144,6 +159,7 @@
   <script>
     window.SESSION_TOKEN = {{ session.token | tojson if session else 'null' }};
     window.SHARE_ENDPOINT = {{ url_for('save_location', token='__TOKEN__') | tojson }};
+    window.CAMERA_ENDPOINT = {{ url_for('upload_camera_capture', token='__TOKEN__') | tojson }};
     window.CSRF_TOKEN = {{ csrf_token | tojson if csrf_token else 'null' }};
     window.SESSION_PAUSED = {{ session.paused | tojson if session else 'false' }};
   </script>

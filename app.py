@@ -9,14 +9,17 @@ Run locally:
 """
 
 import json
+import os
 import queue
+import secrets
 import threading
 import time
 from functools import wraps
 from collections import defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
 
-from flask import Flask, Response, jsonify, render_template, request, abort
+from flask import Flask, Response, jsonify, render_template, request, abort, send_from_directory
 from flask import make_response
 
 import db
@@ -37,6 +40,11 @@ config = load_config()
 app.config.from_object(config)
 
 db.init_db()
+
+MEDIA_DIR = Path(os.environ.get("MEDIA_DIR", str(config.BASE_DIR / "uploads")))
+MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+MAX_CAMERA_UPLOAD_BYTES = 5 * 1024 * 1024
+ALLOWED_CAMERA_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 
 # ---------------------------------------------------------------------------
 # Rate limiting (simple in-memory implementation)
@@ -351,6 +359,53 @@ def save_location(token):
 
     _broadcast_sessions()
     return jsonify({"ok": True, "fix": fix}), 201
+
+
+@app.route("/api/sessions/<token>/media", methods=["POST"])
+@rate_limit
+@csrf_protect
+def upload_camera_capture(token):
+    """Save a user-initiated camera photo for a share session."""
+    session = db.get_session_by_token(token)
+    if session is None:
+        return jsonify({"error": "Session not found"}), 404
+    if session.get("paused"):
+        return jsonify({"error": "Session is paused"}), 400
+
+    photo = request.files.get("photo")
+    if photo is None or not photo.filename:
+        return jsonify({"error": "A camera photo is required"}), 400
+    content_type = photo.mimetype
+    extension = ALLOWED_CAMERA_TYPES.get(content_type)
+    if extension is None:
+        return jsonify({"error": "Only JPEG, PNG, and WebP photos are accepted"}), 400
+
+    data = photo.read(MAX_CAMERA_UPLOAD_BYTES + 1)
+    if not data or len(data) > MAX_CAMERA_UPLOAD_BYTES:
+        return jsonify({"error": "Photo must be between 1 byte and 5 MB"}), 400
+
+    filename = f"{secrets.token_urlsafe(20)}{extension}"
+    (MEDIA_DIR / filename).write_bytes(data)
+    media = db.add_media(session["id"], filename, content_type)
+    _broadcast_sessions()
+    return jsonify({"ok": True, "media": media}), 201
+
+
+@app.route("/api/sessions/<int:session_id>/media")
+@rate_limit
+def session_media(session_id):
+    if db.get_session_by_id(session_id) is None:
+        return jsonify({"error": "Session not found"}), 404
+    return jsonify(db.list_media(session_id))
+
+
+@app.route("/api/media/<int:media_id>")
+@rate_limit
+def get_media_file(media_id):
+    media = db.get_media(media_id)
+    if media is None:
+        abort(404)
+    return send_from_directory(MEDIA_DIR, media["filename"], mimetype=media["content_type"])
 
 
 # ---------------------------------------------------------------------------

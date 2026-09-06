@@ -1,6 +1,7 @@
 """Tests for geo-tracker services and session API."""
 
 from unittest.mock import patch
+import io
 import pytest
 import phonenumbers
 
@@ -445,6 +446,28 @@ def test_share_page_renders(client):
     assert rv.status_code == 200
     assert b"Share your location" in rv.data
     assert session["token"].encode() in rv.data
+
+
+def test_consented_camera_capture(client, tmp_path, monkeypatch):
+    """A share token can upload a user-initiated JPEG camera capture."""
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    monkeypatch.setattr(app_module, "MEDIA_DIR", media_dir)
+    session = client.post("/api/sessions", json={"name": "Camera test"}).get_json()
+
+    rv = client.post(
+        f"/api/sessions/{session['token']}/media",
+        data={"photo": (io.BytesIO(b"jpeg-test-data"), "camera.jpg", "image/jpeg")},
+        content_type="multipart/form-data",
+    )
+    assert rv.status_code == 201
+    media = rv.get_json()["media"]
+    assert (media_dir / media["filename"]).read_bytes() == b"jpeg-test-data"
+
+    listing = client.get(f"/api/sessions/{session['id']}/media")
+    assert listing.status_code == 200
+    assert listing.get_json()[0]["id"] == media["id"]
+    assert client.get(f"/api/media/{media['id']}").status_code == 200
 
 
 # -------------------------------------------------------------------------- 

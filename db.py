@@ -36,11 +36,20 @@ CREATE TABLE IF NOT EXISTS locations (
     timestamp TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS media (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    filename TEXT UNIQUE NOT NULL,
+    content_type TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at);
 CREATE INDEX IF NOT EXISTS idx_locations_session_id ON locations(session_id);
 CREATE INDEX IF NOT EXISTS idx_locations_timestamp ON locations(timestamp);
 CREATE INDEX IF NOT EXISTS idx_locations_session_timestamp ON locations(session_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_media_session_id ON media(session_id);
 """
 
 
@@ -247,6 +256,32 @@ def get_latest_location(token):
     """Return the most recent fix for a session token, or None."""
     trail = get_trail(token)
     return trail[-1] if trail else None
+
+
+def add_media(session_id, filename, content_type):
+    """Record a consented camera capture stored on disk."""
+    with get_connection() as conn:
+        cur = conn.execute(
+            "INSERT INTO media (session_id, filename, content_type, created_at) VALUES (?, ?, ?, ?)",
+            (session_id, filename, content_type, _now_iso()),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM media WHERE id = ?", (cur.lastrowid,)).fetchone()
+        return dict(row)
+
+
+def list_media(session_id):
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM media WHERE session_id = ? ORDER BY id DESC", (session_id,)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_media(media_id):
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM media WHERE id = ?", (media_id,)).fetchone()
+        return dict(row) if row else None
 
 
 def get_sessions_with_status(stale_after_seconds=120):
