@@ -9,7 +9,9 @@ Group=www-data
 WorkingDirectory=/opt/go-tracker/app
 EnvironmentFile=/opt/go-tracker/.env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/go-tracker/venv/bin/gunicorn --workers 1 --bind 127.0.0.1:8000 --timeout 60 app:app
+# SSE keeps dashboard connections open. Threads let other requests continue,
+# while timeout 0 prevents Gunicorn from killing healthy SSE streams.
+ExecStart=/opt/go-tracker/venv/bin/gunicorn --worker-class gthread --workers 1 --threads 8 --bind 127.0.0.1:8010 --timeout 0 app:app
 Restart=always
 RestartSec=5
 

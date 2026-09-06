@@ -1,7 +1,8 @@
 """SQLite storage for geo-tracker sessions and location fixes.
 
 Uses only the Python standard library (sqlite3) — no extra dependencies.
-Enhanced with connection pooling and database indexes for better performance.
+Each operation owns and closes its connection, which keeps SQLite connections
+thread-affine and safe for the web requests plus the cleanup thread.
 """
 
 import sqlite3
@@ -51,53 +52,26 @@ class DatabaseError(BaseDatabaseError):
 __all__ = ['DatabaseError', 'SessionNotFoundError', 'InvalidLocationError']
 
 
-# Connection pool (simple implementation)
-_connection_pool = []
-_pool_lock = None
-
-
-def _init_pool():
-    """Initialize the connection pool lock (lazy)."""
-    global _pool_lock
-    if _pool_lock is None:
-        import threading
-        _pool_lock = threading.Lock()
-
-
 @contextmanager
 def get_connection():
-    """Context manager for database connections with pooling."""
-    _init_pool()
-    conn = None
+    """Open a SQLite connection for the current thread and close it afterward.
+
+    SQLite connections cannot be used from a different thread. Reusing them
+    from a process-wide pool therefore breaks background cleanup and threaded
+    Gunicorn workers.
+    """
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 5000")
     try:
-        with _pool_lock:
-            if _connection_pool:
-                conn = _connection_pool.pop()
-                try:
-                    conn.execute("SELECT 1")
-                except sqlite3.Error:
-                    conn.close()
-                    conn = None
-
-        if conn is None:
-            conn = sqlite3.connect(DB_PATH, timeout=10)
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA foreign_keys = ON")
-            conn.execute("PRAGMA journal_mode = WAL")
-            conn.execute("PRAGMA busy_timeout = 5000")
-
         yield conn
     except sqlite3.Error as e:
-        if conn:
-            conn.rollback()
+        conn.rollback()
         raise DatabaseError(f"Database error: {e}")
     finally:
-        if conn:
-            with _pool_lock:
-                if len(_connection_pool) < 10:  # Max pool size
-                    _connection_pool.append(conn)
-                else:
-                    conn.close()
+        conn.close()
 
 
 def get_conn():

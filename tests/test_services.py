@@ -20,8 +20,6 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", test_db_path)
     # Also set the module-level variable directly
     db.DB_PATH = test_db_path
-    # Clear connection pool to avoid stale connections
-    db._connection_pool.clear()
     # Initialize database with the test path
     db.init_db(drop_existing=True)
     app_module.app.config["TESTING"] = True
