@@ -116,6 +116,8 @@ def add_security_headers(response):
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
     response.headers['X-XSS-Protection'] = '1; mode=block'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    # Explicitly permit camera access for this same-origin consent page.
+    response.headers['Permissions-Policy'] = 'camera=(self), geolocation=(self)'
 
     # HSTS for HTTPS (only in production)
     if not config.DEBUG:

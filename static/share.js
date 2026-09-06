@@ -223,7 +223,10 @@
       cameraStartBtn.hidden = true;
       cameraStatus.innerHTML = '<span class="pulse"></span><span class="ok">Camera is on. Preview stays on this device.</span>';
     } catch (err) {
-      cameraStatus.textContent = "Camera permission was not granted.";
+      const hint = err?.name === "NotFoundError"
+        ? "No camera was found on this device."
+        : "Allow camera access in your browser settings, then try again.";
+      cameraStatus.textContent = `Camera could not start. ${hint}`;
     }
   }
 
