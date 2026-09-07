@@ -32,6 +32,10 @@ class Config:
     RATELIMIT_ENABLED = os.environ.get("RATELIMIT_ENABLED", "true").lower() == "true"
     RATELIMIT_DEFAULT = os.environ.get("RATELIMIT_DEFAULT", "100/hour")
 
+    # Dashboard login
+    ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
+    ADMIN_PASS = os.environ.get("ADMIN_PASS", "admin123")
+
     # CORS (for development)
     CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
 

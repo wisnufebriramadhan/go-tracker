@@ -19,8 +19,11 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, render_template, request, abort, send_from_directory
-from flask import make_response
+from flask import Flask, Response, jsonify, render_template, request, abort, send_from_directory, make_response, redirect, url_for, session as flask_session
+
+import io
+import piexif
+from PIL import Image
 
 import db
 import services
@@ -38,6 +41,8 @@ from validators import (
 app = Flask(__name__)
 config = load_config()
 app.config.from_object(config)
+# Ensure Flask's secret key is always set
+app.secret_key = config.SECRET_KEY
 
 db.init_db()
 
@@ -52,15 +57,14 @@ ALLOWED_CAMERA_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp":
 _rate_limit_data = defaultdict(list)
 _rate_limit_lock = threading.Lock()
 
-
 def check_rate_limit(key, max_requests=100, window_seconds=3600):
     """Check if a request should be rate limited.
-    
+
     Args:
         key: Rate limit key (e.g., IP address)
         max_requests: Maximum requests allowed in window
         window_seconds: Time window in seconds
-        
+
     Returns:
         True if allowed, False if rate limited
     """
@@ -69,7 +73,6 @@ def check_rate_limit(key, max_requests=100, window_seconds=3600):
 
     now = time.time()
     with _rate_limit_lock:
-        # Clean old entries
         _rate_limit_data[key] = [
             t for t in _rate_limit_data[key] if now - t < window_seconds
         ]
@@ -79,7 +82,6 @@ def check_rate_limit(key, max_requests=100, window_seconds=3600):
 
         _rate_limit_data[key].append(now)
         return True
-
 
 def rate_limit(f):
     """Decorator for rate limiting endpoints."""
@@ -94,14 +96,12 @@ def rate_limit(f):
         return f(*args, **kwargs)
     return decorated_function
 
-
 # ---------------------------------------------------------------------------
 # Security headers
 # ---------------------------------------------------------------------------
 @app.after_request
 def add_security_headers(response):
     """Add security headers to all responses."""
-    # Content Security Policy
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com; "
@@ -111,27 +111,22 @@ def add_security_headers(response):
         "font-src 'self' https://unpkg.com;"
     )
 
-    # Other security headers
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
     response.headers['X-XSS-Protection'] = '1; mode=block'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-    # Explicitly permit camera access for this same-origin consent page.
     response.headers['Permissions-Policy'] = 'camera=(self), geolocation=(self)'
 
-    # HSTS for HTTPS (only in production)
     if not config.DEBUG:
         response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
 
     return response
-
 
 # ---------------------------------------------------------------------------
 # CSRF protection (simple token-based)
 # ---------------------------------------------------------------------------
 _csrf_tokens = {}
 _csrf_lock = threading.Lock()
-
 
 def generate_csrf_token():
     """Generate a CSRF token."""
@@ -141,27 +136,29 @@ def generate_csrf_token():
         _csrf_tokens[token] = time.time()
     return token
 
-
 def validate_csrf_token(token):
-    """Validate a CSRF token."""
+    """Validate a CSRF token.
+
+    Tokens are valid for 1 hour and are reusable within that window so a
+    share page can keep uploading camera captures with the token it was
+    given at page load.
+    """
     if not token:
         return False
     with _csrf_lock:
-        if token in _csrf_tokens:
-            # Token expires after 1 hour
-            if time.time() - _csrf_tokens[token] < 3600:
-                del _csrf_tokens[token]
-                return True
-            del _csrf_tokens[token]
+        if token in _csrf_tokens and time.time() - _csrf_tokens[token] < 3600:
+            return True
+        # Drop stale tokens lazily
+        stale = [t for t, ts in _csrf_tokens.items() if time.time() - ts >= 3600]
+        for t in stale:
+            del _csrf_tokens[t]
     return False
-
 
 def csrf_protect(f):
     """Decorator for CSRF protection on state-changing endpoints."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if request.method in ['POST', 'PUT', 'DELETE']:
-            # Skip CSRF check in testing mode
             if app.config.get('TESTING'):
                 return f(*args, **kwargs)
             token = request.headers.get('X-CSRF-Token') or request.form.get('csrf_token')
@@ -170,13 +167,11 @@ def csrf_protect(f):
         return f(*args, **kwargs)
     return decorated_function
 
-
 # ---------------------------------------------------------------------------
 # Server-Sent Events (SSE): push session changes to open dashboards instantly
 # ---------------------------------------------------------------------------
 _sse_clients = []
 _sse_lock = threading.Lock()
-
 
 def _broadcast_sessions():
     """Push the current session list to every connected SSE client."""
@@ -186,8 +181,7 @@ def _broadcast_sessions():
             try:
                 q.put_nowait(("sessions", payload))
             except queue.Full:
-                pass  # slow client — skip this update
-
+                pass
 
 @app.route("/api/events")
 def sse_events():
@@ -215,6 +209,61 @@ def sse_events():
     resp.headers["X-Accel-Buffering"] = "no"
     return resp
 
+# ---------------------------------------------------------------------------
+# Login / Logout
+# ---------------------------------------------------------------------------
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "").strip()
+
+        if not username or not password:
+            return render_template("login.html", error="Username and password are required")
+
+        # Check against stored credentials
+        stored_user = app.config.get("ADMIN_USER", "admin")
+        stored_pass = app.config.get("ADMIN_PASS", "admin123")
+
+        if username == stored_user and password == stored_pass:
+            flask_session["logged_in"] = True
+            flask_session["user"] = username
+            return redirect(url_for("index"))
+        else:
+            return render_template("login.html", error="Invalid username or password")
+
+    return render_template("login.html")
+
+@app.route("/logout")
+def logout():
+    flask_session.clear()
+    return redirect(url_for("login"))
+
+@app.before_request
+def require_login():
+    """Protect the dashboard and its APIs. Share pages stay public.
+
+    Everything needs a login except:
+      - static assets, the login page itself
+      - /share/<token> pages and the token-based share APIs
+        (location updates and camera media), which are the whole point
+        of sharing a link with another device
+    """
+    if app.config.get("TESTING"):
+        return
+    if request.path.startswith("/static") or request.path == "/login" or request.path == "/favicon.ico":
+        return
+    if request.path.startswith("/share/"):
+        return
+    # Token-based share APIs stay open: location updates + camera media
+    if request.path.startswith("/api/sessions/"):
+        rest = request.path[len("/api/sessions/"):]
+        if "/location" in rest or "/media" in rest:
+            return
+    if not flask_session.get("logged_in"):
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "Authentication required"}), 401
+        return redirect(url_for("login"))
 
 # ---------------------------------------------------------------------------
 # Pages
@@ -222,7 +271,6 @@ def sse_events():
 @app.route("/")
 def index():
     return render_template("index.html")
-
 
 @app.route("/share/<token>")
 def share(token):
@@ -247,7 +295,6 @@ def share(token):
     csrf_token = generate_csrf_token()
 
     return render_template("share.html", session=session, csrf_token=csrf_token)
-
 
 # ---------------------------------------------------------------------------
 # Sessions API
@@ -282,7 +329,6 @@ def sessions_api():
     sessions = db.get_sessions_with_status()
     return jsonify(sessions)
 
-
 @app.route("/api/sessions/<int:session_id>", methods=["GET", "DELETE"])
 @rate_limit
 def session_api(session_id):
@@ -309,7 +355,6 @@ def session_api(session_id):
         "latest": latest,
         "trail": trail
     })
-
 
 @app.route("/api/sessions/<token>/location", methods=["POST"])
 @rate_limit
@@ -362,36 +407,296 @@ def save_location(token):
     _broadcast_sessions()
     return jsonify({"ok": True, "fix": fix}), 201
 
+def _decimal_to_dms_rational(value):
+    """
+    Convert decimal GPS coordinate into EXIF DMS rational format.
+
+    Example:
+        -6.208763
+
+    becomes approximately:
+        6° 12' 31.5468"
+    """
+    value = abs(float(value))
+
+    degrees = int(value)
+
+    minutes_float = (value - degrees) * 60
+    minutes = int(minutes_float)
+
+    seconds = (minutes_float - minutes) * 60
+
+    return (
+        (degrees, 1),
+        (minutes, 1),
+        (int(round(seconds * 1_000_000)), 1_000_000),
+    )
+
+
+def _add_gps_exif_to_jpeg(data, lat, lon):
+    """
+    Embed latitude/longitude into JPEG EXIF metadata.
+
+    Returns modified JPEG bytes.
+    """
+
+    image = Image.open(io.BytesIO(data))
+
+    # Make sure output is JPEG-compatible
+    if image.mode not in ("RGB", "L"):
+        image = image.convert("RGB")
+
+    try:
+        existing_exif = image.info.get("exif")
+
+        if existing_exif:
+            exif_dict = piexif.load(existing_exif)
+        else:
+            exif_dict = {
+                "0th": {},
+                "Exif": {},
+                "GPS": {},
+                "1st": {},
+                "thumbnail": None,
+            }
+    except Exception:
+        exif_dict = {
+            "0th": {},
+            "Exif": {},
+            "GPS": {},
+            "1st": {},
+            "thumbnail": None,
+        }
+
+    gps_ifd = exif_dict.setdefault("GPS", {})
+
+    gps_ifd[piexif.GPSIFD.GPSLatitudeRef] = (
+        b"N" if lat >= 0 else b"S"
+    )
+
+    gps_ifd[piexif.GPSIFD.GPSLatitude] = (
+        _decimal_to_dms_rational(lat)
+    )
+
+    gps_ifd[piexif.GPSIFD.GPSLongitudeRef] = (
+        b"E" if lon >= 0 else b"W"
+    )
+
+    gps_ifd[piexif.GPSIFD.GPSLongitude] = (
+        _decimal_to_dms_rational(lon)
+    )
+
+    exif_bytes = piexif.dump(exif_dict)
+
+    output = io.BytesIO()
+
+    image.save(
+        output,
+        format="JPEG",
+        quality=95,
+        exif=exif_bytes,
+    )
+
+    return output.getvalue()
 
 @app.route("/api/sessions/<token>/media", methods=["POST"])
-@rate_limit
+# @rate_limit
 @csrf_protect
 def upload_camera_capture(token):
-    """Save a user-initiated camera photo for a share session."""
+    """
+    Save a user-initiated camera photo for a share session.
+
+    If valid GPS coordinates are included with a JPEG photo,
+    latitude/longitude are also embedded into the JPEG EXIF.
+    """
+
+    # ========================================================
+    # SESSION VALIDATION
+    # ========================================================
+
     session = db.get_session_by_token(token)
+
     if session is None:
-        return jsonify({"error": "Session not found"}), 404
+        return jsonify({
+            "error": "Session not found"
+        }), 404
+
     if session.get("paused"):
-        return jsonify({"error": "Session is paused"}), 400
+        return jsonify({
+            "error": "Session is paused"
+        }), 400
+
+
+    # ========================================================
+    # PHOTO VALIDATION
+    # ========================================================
 
     photo = request.files.get("photo")
+
     if photo is None or not photo.filename:
-        return jsonify({"error": "A camera photo is required"}), 400
+        return jsonify({
+            "error": "A camera photo is required"
+        }), 400
+
     content_type = photo.mimetype
-    extension = ALLOWED_CAMERA_TYPES.get(content_type)
+
+    extension = ALLOWED_CAMERA_TYPES.get(
+        content_type
+    )
+
     if extension is None:
-        return jsonify({"error": "Only JPEG, PNG, and WebP photos are accepted"}), 400
+        return jsonify({
+            "error":
+                "Only JPEG, PNG, and WebP photos are accepted"
+        }), 400
 
-    data = photo.read(MAX_CAMERA_UPLOAD_BYTES + 1)
-    if not data or len(data) > MAX_CAMERA_UPLOAD_BYTES:
-        return jsonify({"error": "Photo must be between 1 byte and 5 MB"}), 400
 
-    filename = f"{secrets.token_urlsafe(20)}{extension}"
-    (MEDIA_DIR / filename).write_bytes(data)
-    media = db.add_media(session["id"], filename, content_type)
+    # ========================================================
+    # READ PHOTO
+    # ========================================================
+
+    data = photo.read(
+        MAX_CAMERA_UPLOAD_BYTES + 1
+    )
+
+    if (
+        not data
+        or len(data) > MAX_CAMERA_UPLOAD_BYTES
+    ):
+        return jsonify({
+            "error":
+                "Photo must be between 1 byte and 5 MB"
+        }), 400
+
+
+    # ========================================================
+    # GPS DATA
+    # ========================================================
+
+    lat = None
+    lon = None
+    accuracy = None
+
+    try:
+        raw_lat = request.form.get("lat")
+        raw_lon = request.form.get("lon")
+        raw_accuracy = request.form.get("accuracy")
+
+        if (
+            raw_lat is not None
+            and raw_lon is not None
+        ):
+            lat = float(raw_lat)
+            lon = float(raw_lon)
+
+            valid, error = validate_coordinates(
+                lat,
+                lon
+            )
+
+            if not valid:
+                lat = None
+                lon = None
+
+        if raw_accuracy:
+            accuracy = float(
+                raw_accuracy
+            )
+
+    except (
+        TypeError,
+        ValueError
+    ):
+        lat = None
+        lon = None
+        accuracy = None
+
+
+    # ========================================================
+    # EMBED GPS INTO JPEG EXIF
+    # ========================================================
+
+    gps_embedded = False
+
+    if (
+        lat is not None
+        and lon is not None
+        and content_type
+        in (
+            "image/jpeg",
+            "image/jpg",
+        )
+    ):
+        try:
+            data = _add_gps_exif_to_jpeg(
+                data,
+                lat,
+                lon,
+            )
+
+            gps_embedded = True
+
+        except Exception as exc:
+            # Do not reject the upload if EXIF writing fails.
+            # Coordinates are still stored in the database.
+            app.logger.warning(
+                "Could not add GPS EXIF: %s",
+                exc,
+            )
+
+
+    # ========================================================
+    # SAVE FILE
+    # ========================================================
+
+    filename = (
+        f"{secrets.token_urlsafe(20)}"
+        f"{extension}"
+    )
+
+    filepath = (
+        MEDIA_DIR / filename
+    )
+
+    filepath.write_bytes(
+        data
+    )
+
+
+    # ========================================================
+    # DATABASE
+    # ========================================================
+
+    media = db.add_media(
+        session["id"],
+        filename,
+        content_type,
+        lat=lat,
+        lon=lon,
+    )
+
+
+    # ========================================================
+    # BROADCAST
+    # ========================================================
+
     _broadcast_sessions()
-    return jsonify({"ok": True, "media": media}), 201
 
+
+    # ========================================================
+    # RESPONSE
+    # ========================================================
+
+    return jsonify({
+        "ok": True,
+        "media": media,
+        "gps": {
+            "lat": lat,
+            "lon": lon,
+            "accuracy": accuracy,
+            "embedded_in_exif": gps_embedded,
+        },
+    }), 201
 
 @app.route("/api/sessions/<token>/media", methods=["GET"])
 @rate_limit
@@ -401,7 +706,6 @@ def session_media(token):
         return jsonify({"error": "Session not found"}), 404
     return jsonify(db.list_media(session["id"]))
 
-
 @app.route("/api/sessions/<token>/media/<int:media_id>")
 @rate_limit
 def get_media_file(token, media_id):
@@ -410,7 +714,6 @@ def get_media_file(token, media_id):
     if media is None or session is None or media["session_id"] != session["id"]:
         abort(404)
     return send_from_directory(MEDIA_DIR, media["filename"], mimetype=media["content_type"])
-
 
 # ---------------------------------------------------------------------------
 # Session control endpoints (pause/resume)
@@ -432,7 +735,6 @@ def pause_session(session_id):
     _broadcast_sessions()
     return jsonify({"ok": True, "paused": True})
 
-
 @app.route("/api/sessions/<int:session_id>/resume", methods=["POST"])
 @rate_limit
 @csrf_protect
@@ -449,7 +751,6 @@ def resume_session(session_id):
     db.update_session(session_id, paused=0)
     _broadcast_sessions()
     return jsonify({"ok": True, "paused": False})
-
 
 # ---------------------------------------------------------------------------
 # Export endpoints
@@ -487,7 +788,6 @@ def export_session(session_id, format):
     response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
 
-
 def _generate_gpx(session, trail):
     """Generate GPX XML content."""
     import xml.etree.ElementTree as ET
@@ -518,7 +818,6 @@ def _generate_gpx(session, trail):
         time_elem.text = point["timestamp"]
 
     return ET.tostring(gpx, encoding="unicode", xml_declaration=True)
-
 
 def _generate_kml(session, trail):
     """Generate KML XML content."""
@@ -559,7 +858,6 @@ def _generate_kml(session, trail):
 
     return ET.tostring(kml, encoding="unicode", xml_declaration=True)
 
-
 # ---------------------------------------------------------------------------
 # Lookup APIs
 # ---------------------------------------------------------------------------
@@ -580,7 +878,6 @@ def ip_api(address):
         app.logger.error(f"IP lookup error: {e}")
         return jsonify({"error": "Internal server error"}), 500
 
-
 @app.route("/api/phone/<path:number>")
 @rate_limit
 def phone_api(number):
@@ -598,7 +895,6 @@ def phone_api(number):
         app.logger.error(f"Phone lookup error: {e}")
         return jsonify({"error": "Internal server error"}), 500
 
-
 # ---------------------------------------------------------------------------
 # Stats API
 # ---------------------------------------------------------------------------
@@ -613,7 +909,6 @@ def stats_api():
         app.logger.error(f"Stats error: {e}")
         return jsonify({"error": "Internal server error"}), 500
 
-
 # ---------------------------------------------------------------------------
 # CSRF token endpoint
 # ---------------------------------------------------------------------------
@@ -622,7 +917,6 @@ def csrf_token():
     """Get a new CSRF token."""
     token = generate_csrf_token()
     return jsonify({"csrf_token": token})
-
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -633,7 +927,6 @@ def not_found(e):
         return jsonify({"error": "Not found"}), 404
     return render_template("share.html", error="Page not found"), 404
 
-
 @app.errorhandler(429)
 def rate_limit_exceeded(e):
     return jsonify({
@@ -641,31 +934,25 @@ def rate_limit_exceeded(e):
         "retry_after": 3600
     }), 429
 
-
 @app.errorhandler(500)
 def server_error(e):
     return jsonify({"error": "Internal server error"}), 500
-
 
 @app.errorhandler(DatabaseError)
 def handle_database_error(e):
     return jsonify({"error": "Database error"}), 500
 
-
 @app.errorhandler(ValidationError)
 def handle_validation_error(e):
     return jsonify({"error": str(e)}), 400
-
 
 @app.errorhandler(APIError)
 def handle_api_error(e):
     return jsonify({"error": str(e)}), 502
 
-
 @app.errorhandler(CSRFError)
 def handle_csrf_error(e):
     return jsonify({"error": "CSRF validation failed"}), 403
-
 
 # ---------------------------------------------------------------------------
 # Cleanup task (runs in background)

@@ -26,46 +26,36 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Open **http://127.0.0.1:5000** — you'll see the dashboard. Create a share link, open it in another tab/phone browser, press **Start sharing**, and watch the marker move on the map.
+Open **http://127.0.0.1:5000** — you'll be asked to sign in (default: `admin` / `admin123`, override with `ADMIN_USER` / `ADMIN_PASS` in `.env`). Create a share link, open it in another tab/phone browser, press **Start sharing**, and watch the marker move on the map.
+
+Share pages (`/share/<token>`) and their APIs stay **public by design** — that's the point of a share link — while the dashboard and its APIs require login.
+
+## Camera photos on the dashboard
+
+From the share page, the visitor can enable the camera and take a photo (with the usual browser permission prompt). Photos are uploaded to the dashboard where they appear as **thumbnail markers on the map** (with a larger preview in the popup), in the session card as a 📷 count, and in the **Photos** gallery modal. When GPS is active, each capture is tagged with the current coordinates so it lands exactly where it was taken.
+
+## Deploy (one command)
+
+The app is deployed at **https://wisnufebri.cloud** (nginx → gunicorn → Flask on the server).
+
+```bash
+cd geo-tracker/.deploy
+./deploy.sh        # rsync + restart + health check
+```
+
+First-time server setup (already done):
+
+1. SSH in once, install an SSH key (`cat id_ed25519.pub >> ~/.ssh/authorized_keys`) and fix home dir permissions (`chmod go-w ~`).
+2. Write a valid `.env` with real newlines: `FLASK_ENV`, `SECRET_KEY`, `DB_PATH`, `MEDIA_DIR`, `ADMIN_USER`, `ADMIN_PASS`.
+3. The systemd unit `go-tracker.service` runs gunicorn on `127.0.0.1:8010`; nginx/Cloudflare serves it publicly. Restarting is done by killing gunicorn — systemd's `Restart=always` respawns it, no root needed.
+
+`.deploy/` is gitignored — it holds the SSH key and is not meant to be shared.
 
 ### Run tests
 
 ```bash
 pytest -q
 ```
-
-## Automatic deployment (GitHub Actions)
-
-Every push to `main` deploys over SSH. The current failures stop in **Configure
-SSH**, which means a required GitHub Actions secret has not been set (the server
-has not been contacted yet).
-
-On the Ubuntu server, run the one-time bootstrap as root (first review the
-repository URL in the script):
-
-```bash
-git clone https://github.com/wisnufebriramadhan/go-tracker.git /tmp/go-tracker
-sudo /tmp/go-tracker/deploy/bootstrap-server.sh
-sudoedit /opt/go-tracker/.env
-```
-
-Set a real `SECRET_KEY` in `/opt/go-tracker/.env`. Then add these repository
-secrets in **GitHub → Settings → Secrets and variables → Actions**:
-
-| Secret | Value |
-|---|---|
-| `DEPLOY_HOST` | Server IP address or DNS name |
-| `DEPLOY_USER` | `deployer` (or the SSH user configured on the server) |
-| `DEPLOY_SSH_KEY` | Private key for that user, including its header/footer |
-| `DEPLOY_KNOWN_HOSTS` | Output of `ssh-keyscan -H <server-host>` run from a trusted machine |
-
-Add the matching public key to `/home/deployer/.ssh/authorized_keys` on the
-server (for example, generate it locally with `ssh-keygen -t ed25519 -f
-go-tracker-deploy -C go-tracker-deploy`). The user may run only
-`/usr/local/sbin/deploy-go-tracker` with `sudo`.
-After committing this setup, use **Actions → Deploy → Run workflow**, or push
-to `main`. The workflow now reports the exact missing secret instead of an
-unexplained exit code.
 
 ## Testing from a real phone (HTTPS required)
 

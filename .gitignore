@@ -10,6 +10,9 @@ __pycache__/
 geo.db
 geo.db-*
 
+# Deployment secrets (SSH key + one-time password helper) — never commit
+.deploy/
+
 # Editor and operating-system files
 .DS_Store
 .vscode/

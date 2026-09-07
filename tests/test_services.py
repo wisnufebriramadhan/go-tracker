@@ -457,17 +457,133 @@ def test_consented_camera_capture(client, tmp_path, monkeypatch):
 
     rv = client.post(
         f"/api/sessions/{session['token']}/media",
-        data={"photo": (io.BytesIO(b"jpeg-test-data"), "camera.jpg", "image/jpeg")},
+        data={
+            "photo": (io.BytesIO(b"jpeg-test-data"), "camera.jpg", "image/jpeg"),
+            "lat": "-6.2",
+            "lon": "106.8",
+        },
         content_type="multipart/form-data",
     )
     assert rv.status_code == 201
     media = rv.get_json()["media"]
     assert (media_dir / media["filename"]).read_bytes() == b"jpeg-test-data"
+    assert media["lat"] == -6.2
+    assert media["lon"] == 106.8
 
     listing = client.get(f"/api/sessions/{session['token']}/media")
     assert listing.status_code == 200
     assert listing.get_json()[0]["id"] == media["id"]
     assert client.get(f"/api/sessions/{session['token']}/media/{media['id']}").status_code == 200
+
+
+def test_session_status_includes_distance_and_photos(client, tmp_path, monkeypatch):
+    """Session status payload carries trail distance and geotagged photos."""
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    monkeypatch.setattr(app_module, "MEDIA_DIR", media_dir)
+
+    session = client.post("/api/sessions", json={"name": "Distance"}).get_json()
+    token = session["token"]
+
+    # Two nearby points -> small but non-zero distance
+    client.post(f"/api/sessions/{token}/location", json={"lat": -6.2, "lon": 106.8})
+    client.post(f"/api/sessions/{token}/location", json={"lat": -6.201, "lon": 106.801})
+
+    # Upload a geotagged photo
+    client.post(
+        f"/api/sessions/{token}/media",
+        data={
+            "photo": (io.BytesIO(b"jpeg-test-data"), "camera.jpg", "image/jpeg"),
+            "lat": "-6.2",
+            "lon": "106.8",
+        },
+        content_type="multipart/form-data",
+    )
+
+    rv = client.get("/api/sessions")
+    assert rv.status_code == 200
+    data = rv.get_json()[0]
+    assert data["distance_km"] > 0
+    assert data["photo_count"] == 1
+    assert data["photos"][0]["lat"] == -6.2
+
+
+# --------------------------------------------------------------------------
+# Login / auth
+# --------------------------------------------------------------------------
+def test_dashboard_requires_login(client):
+    """Dashboard and protected APIs redirect/401 without a session."""
+    app_module.app.config["TESTING"] = False
+    try:
+        rv = client.get("/")
+        assert rv.status_code == 302
+        assert "/login" in rv.headers["Location"]
+
+        rv = client.get("/api/sessions")
+        assert rv.status_code == 401
+        assert "Authentication required" in rv.get_json()["error"]
+    finally:
+        app_module.app.config["TESTING"] = True
+
+
+def test_login_logout_flow(client):
+    """Wrong password rejected; correct login grants access; logout revokes."""
+    app_module.app.config["TESTING"] = False
+    try:
+        # Wrong password
+        rv = client.post("/login", data={"username": "admin", "password": "wrong"})
+        assert rv.status_code == 200
+        assert b"Invalid username or password" in rv.data
+
+        # Login page renders
+        rv = client.get("/login")
+        assert rv.status_code == 200
+        assert b"Sign in" in rv.data
+
+        # Correct credentials
+        rv = client.post("/login", data={"username": "admin", "password": "admin123"})
+        assert rv.status_code == 302
+        assert rv.headers["Location"].endswith("/")
+
+        # Dashboard now accessible
+        rv = client.get("/")
+        assert rv.status_code == 200
+        assert b"Geo Tracker" in rv.data
+
+        # Logout revokes access
+        rv = client.get("/logout")
+        assert rv.status_code == 302
+        rv = client.get("/")
+        assert rv.status_code == 302
+    finally:
+        app_module.app.config["TESTING"] = True
+
+
+def test_share_api_stays_public_without_login(client):
+    """Share links and their token APIs work for anonymous visitors."""
+    app_module.app.config["TESTING"] = False
+    try:
+        # Create a session while testing mode is on (dashboard-only action)
+        app_module.app.config["TESTING"] = True
+        session = client.post("/api/sessions", json={"name": "Public share"}).get_json()
+        app_module.app.config["TESTING"] = False
+
+        # Location post works without login
+        rv = client.post(
+            f"/api/sessions/{session['token']}/location",
+            json={"lat": -6.2, "lon": 106.8},
+        )
+        assert rv.status_code == 201
+
+        # Share page renders without login
+        rv = client.get(f"/share/{session['token']}")
+        assert rv.status_code == 200
+
+        # Dashboard API still blocked
+        rv = client.get("/api/sessions")
+        assert rv.status_code == 401
+    finally:
+        app_module.app.config["TESTING"] = True
 
 
 # -------------------------------------------------------------------------- 

@@ -16,7 +16,7 @@ const lookupLayer = L.layerGroup().addTo(map); // IP / phone lookup markers
 /* ------------------------------------------------------------------ */
 /* State                                                               */
 /* ------------------------------------------------------------------ */
-const sessionById = {};   // id -> { card element, marker, circle, trail, data }
+const sessionById = {};   // id -> { card element, marker, circle, trail, photoMarkers, data }
 let lastLookupMarker = null;
 let csrfToken = null;
 
@@ -57,6 +57,10 @@ function toast(msg) {
 }
 
 async function api(url, options = {}) {
+  if (csrfToken && options.method && options.method !== 'GET') {
+    options.headers = options.headers || {};
+    options.headers['X-CSRF-Token'] = csrfToken;
+  }
   const resp = await fetch(url, options);
   if (!resp.ok) {
     let msg = `HTTP ${resp.status}`;
@@ -76,6 +80,16 @@ async function fetchCsrfToken() {
   } catch (err) {
     console.error("Failed to fetch CSRF token:", err);
   }
+}
+
+function checkLogin() {
+  fetch("/api/csrf-token", { method: "GET" })
+    .then(res => {
+      if (res.status === 302) {
+        window.location.href = "/login";
+      }
+    })
+    .catch(() => {});
 }
 
 /* ------------------------------------------------------------------ */
@@ -123,6 +137,7 @@ function renderSessions(data) {
       if (entry.marker) liveLayer.removeLayer(entry.marker);
       if (entry.circle) liveLayer.removeLayer(entry.circle);
       if (entry.trail) liveLayer.removeLayer(entry.trail);
+      removePhotoMarkers(entry);
       entry.card.remove();
       delete sessionById[id];
     }
@@ -160,7 +175,7 @@ function connectSSE() {
 function createSessionEntry(s) {
   const card = document.createElement("div");
   card.className = "session-card" + (s.paused ? " paused" : "");
-  const entry = { id: s.id, card, data: s, marker: null, circle: null, trail: null };
+  const entry = { id: s.id, card, data: s, marker: null, circle: null, trail: null, photoMarkers: [] };
   sessionById[s.id] = entry;
 
   card.addEventListener("click", () => {
@@ -181,11 +196,13 @@ function updateSessionCard(entry) {
       <span class="status-dot ${status}" title="${statusLabel}"></span>
     </div>
     <div class="session-meta">
-      ${s.points} point(s) • last seen ${fmtAge(s.latest && s.latest.timestamp)}<br>
+      ${s.points} point(s)${s.distance_km > 0 ? ` • ${s.distance_km.toFixed(2)} km` : ""}
+      ${s.photo_count ? ` • 📷 ${s.photo_count}` : ""} • last seen ${fmtAge(s.latest && s.latest.timestamp)}<br>
       ${s.latest ? `@ ${s.latest.lat.toFixed(5)}, ${s.latest.lon.toFixed(5)}` : "Waiting for first fix…"}
     </div>
     <div class="session-actions">
       <button class="btn small copy-btn" data-token="${esc(s.token)}">Copy link</button>
+      <button class="btn small show-btn" data-id="${s.id}">Show</button>
       <button class="btn small ${s.paused ? 'primary' : 'warning'} pause-btn" data-id="${s.id}" data-paused="${s.paused}">
         ${s.paused ? '▶ Resume' : '⏸ Pause'}
       </button>
@@ -197,6 +214,16 @@ function updateSessionCard(entry) {
   entry.card.querySelector(".copy-btn").addEventListener("click", (ev) => {
     ev.stopPropagation();
     copyShareLink(s.token);
+  });
+
+  entry.card.querySelector(".show-btn").addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    const latest = entry.data.latest;
+    if (latest) {
+      map.flyTo([latest.lat, latest.lon], Math.max(map.getZoom(), 13));
+    } else {
+      toast(`No location yet for "${s.name}"`);
+    }
   });
 
   entry.card.querySelector(".pause-btn").addEventListener("click", async (ev) => {
@@ -272,6 +299,45 @@ function updateSessionMap(entry) {
     entry.circle.setStyle({ color });
     entry.trail.addLatLng([latest.lat, latest.lon]);
     entry.trail.setStyle({ color });
+  }
+  syncPhotoMarkers(entry);
+}
+
+/* ------------------------------------------------------------------ */
+/* Camera photo markers on the map                                     */
+/* ------------------------------------------------------------------ */
+function removePhotoMarkers(entry) {
+  (entry.photoMarkers || []).forEach((m) => liveLayer.removeLayer(m));
+  entry.photoMarkers = [];
+}
+
+function syncPhotoMarkers(entry) {
+  const photos = entry.data.photos || [];
+  const seen = new Set(photos.map((p) => p.id));
+
+  // Drop markers for photos that vanished
+  entry.photoMarkers = (entry.photoMarkers || []).filter((m) => {
+    if (seen.has(m.photoId)) return true;
+    liveLayer.removeLayer(m.marker);
+    return false;
+  });
+
+  for (const p of photos) {
+    if (entry.photoMarkers.some((m) => m.photoId === p.id)) continue;
+    const url = `/api/sessions/${encodeURIComponent(entry.data.token)}/media/${p.id}`;
+    const icon = L.divIcon({
+      className: "photo-marker-wrap",
+      html: `<img class="photo-marker" src="${url}" alt="Camera capture" loading="lazy">`,
+      iconSize: [44, 44],
+      iconAnchor: [22, 22],
+    });
+    const marker = L.marker([p.lat, p.lon], { icon });
+    marker.bindPopup(
+      `<b>${esc(entry.data.name)}</b> — camera capture<br>` +
+      `<img src="${url}" alt="Camera capture" style="width:220px;border-radius:8px;margin-top:6px;">`
+    );
+    marker.addTo(liveLayer);
+    entry.photoMarkers.push({ photoId: p.id, marker });
   }
 }
 

@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS media (
     session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     filename TEXT UNIQUE NOT NULL,
     content_type TEXT NOT NULL,
+    lat REAL,
+    lon REAL,
     created_at TEXT NOT NULL
 );
 
@@ -100,10 +102,26 @@ def init_db(drop_existing=False):
     with get_connection() as conn:
         if drop_existing:
             conn.execute("DROP TABLE IF EXISTS locations")
+            conn.execute("DROP TABLE IF EXISTS media")
             conn.execute("DROP TABLE IF EXISTS sessions")
             conn.commit()
         conn.executescript(SCHEMA)
+        _migrate(conn)
         conn.commit()
+
+
+def _migrate(conn):
+    """Apply lightweight schema migrations to existing databases.
+
+    Older databases were created before the media table had lat/lon
+    columns. CREATE TABLE IF NOT EXISTS will not add them, so add them
+    here when missing.
+    """
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(media)").fetchall()}
+    if "lat" not in cols:
+        conn.execute("ALTER TABLE media ADD COLUMN lat REAL")
+    if "lon" not in cols:
+        conn.execute("ALTER TABLE media ADD COLUMN lon REAL")
 
 
 def _now_iso():
@@ -258,12 +276,13 @@ def get_latest_location(token):
     return trail[-1] if trail else None
 
 
-def add_media(session_id, filename, content_type):
+def add_media(session_id, filename, content_type, lat=None, lon=None):
     """Record a consented camera capture stored on disk."""
     with get_connection() as conn:
         cur = conn.execute(
-            "INSERT INTO media (session_id, filename, content_type, created_at) VALUES (?, ?, ?, ?)",
-            (session_id, filename, content_type, _now_iso()),
+            "INSERT INTO media (session_id, filename, content_type, lat, lon, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, filename, content_type, lat, lon, _now_iso()),
         )
         conn.commit()
         row = conn.execute("SELECT * FROM media WHERE id = ?", (cur.lastrowid,)).fetchone()
@@ -284,11 +303,23 @@ def get_media(media_id):
         return dict(row) if row else None
 
 
+def _haversine_km(lat1, lon1, lat2, lon2):
+    """Great-circle distance between two coordinates in kilometres."""
+    import math
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
 def get_sessions_with_status(stale_after_seconds=120):
     """Return all sessions plus their latest fix and trail length.
 
     Each item: session dict + 'latest' (fix dict or None) + 'points' count
-    + 'active' bool (latest fix within stale_after_seconds).
+    + 'active' bool (latest fix within stale_after_seconds) + 'distance_km'
+    (total trail length) + 'photo_count' + 'photos' (geotagged captures).
     """
     sessions = list_sessions()
     result = []
@@ -312,6 +343,20 @@ def get_sessions_with_status(stale_after_seconds=120):
                 active = age <= stale_after_seconds
             except ValueError:
                 active = False
+
+        # Total trail distance (km)
+        distance_km = 0.0
+        for i in range(1, len(trail)):
+            distance_km += _haversine_km(
+                trail[i - 1]["lat"], trail[i - 1]["lon"],
+                trail[i]["lat"], trail[i]["lon"],
+            )
+
+        photos = []
+        for m in list_media(s["id"]):
+            if m.get("lat") is not None and m.get("lon") is not None:
+                photos.append({"id": m["id"], "lat": m["lat"], "lon": m["lon"]})
+
         result.append(
             {
                 "id": s["id"],
@@ -320,8 +365,11 @@ def get_sessions_with_status(stale_after_seconds=120):
                 "created_at": s["created_at"],
                 "paused": bool(s.get("paused")),
                 "points": len(trail),
+                "distance_km": round(distance_km, 3),
                 "active": active,
                 "latest": latest,
+                "photo_count": len(photos),
+                "photos": photos,
             }
         )
     return result

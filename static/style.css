@@ -36,7 +36,30 @@ body {
   gap: 16px;
 }
 
+.brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .brand { font-size: 1.4rem; }
+
+.logout-link {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.logout-link:hover {
+  color: var(--red);
+  border-color: var(--red);
+}
+
 .tagline { color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
 
 .panel {
@@ -193,12 +216,18 @@ select {
   margin-top: 5px;
 }
 
-.session-actions { display: flex; gap: 6px; margin-top: 8px; }
+.session-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 8px;
+}
 
 .session-actions .btn {
   margin-top: 0;
-  flex: 1;
+  width: auto;
   text-align: center;
+  white-space: nowrap;
 }
 
 .empty { color: var(--muted); font-size: 0.85rem; padding: 8px 2px; }
@@ -238,6 +267,23 @@ select {
 }
 
 .photo-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; max-height: 55vh; overflow: auto; color: var(--muted); }
+
+/* Camera photo markers on the map */
+.photo-marker-wrap {
+  background: transparent;
+  border: none;
+}
+
+.photo-marker-wrap .photo-marker {
+  display: block;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  background: var(--panel);
+}
 .photo-item { margin: 0; }
 .photo-item img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
 .photo-item figcaption { margin-top: 4px; font-size: .75rem; color: var(--muted); }
