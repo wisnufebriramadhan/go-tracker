@@ -16,6 +16,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+
       - name: Configure SSH
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -32,7 +35,21 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
-      - name: Deploy application
+      - name: Upload release source
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          test -n "$DEPLOY_USER"
+          # Send this exact commit from the runner. The server does not need
+          # outbound access to github.com to deploy it.
+          git archive --format=tar HEAD | ssh -i ~/.ssh/deploy_key \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            'tar -xf - -C /opt/go-tracker/app'
+
+      - name: Install dependencies and restart service
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
@@ -42,4 +59,4 @@ jobs:
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             "$DEPLOY_USER@$DEPLOY_HOST" \
-            'sudo /usr/local/sbin/deploy-go-tracker'
+            '/opt/go-tracker/venv/bin/pip install --disable-pip-version-check --requirement /opt/go-tracker/app/requirements.txt && sudo systemctl restart go-tracker && sudo systemctl is-active --quiet go-tracker'
