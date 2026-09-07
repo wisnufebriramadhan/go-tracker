@@ -287,6 +287,8 @@ select {
 .photo-item { margin: 0; }
 .photo-item img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
 .photo-item figcaption { margin-top: 4px; font-size: .75rem; color: var(--muted); }
+.photo-download { display: inline-block; margin-top: 6px; color: var(--green); font-size: .8rem; font-weight: 700; text-decoration: none; }
+.photo-download:hover { text-decoration: underline; }
 
 .modal-actions .btn {
   flex: 1;

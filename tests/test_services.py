@@ -479,6 +479,9 @@ def test_consented_camera_capture(client, tmp_path, monkeypatch):
     assert listing.status_code == 200
     assert listing.get_json()[0]["id"] == media["id"]
     assert client.get(f"/api/sessions/{session['token']}/media/{media['id']}").status_code == 200
+    download = client.get(f"/api/sessions/{session['token']}/media/{media['id']}?download=1")
+    assert download.status_code == 200
+    assert "attachment" in download.headers["Content-Disposition"]
 
 
 def test_session_status_includes_distance_and_photos(client, tmp_path, monkeypatch):

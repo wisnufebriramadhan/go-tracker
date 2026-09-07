@@ -334,7 +334,8 @@ function syncPhotoMarkers(entry) {
     const marker = L.marker([p.lat, p.lon], { icon });
     marker.bindPopup(
       `<b>${esc(entry.data.name)}</b> — camera capture<br>` +
-      `<img src="${url}" alt="Camera capture" style="width:220px;border-radius:8px;margin-top:6px;">`
+      `<img src="${url}" alt="Camera capture" style="width:220px;border-radius:8px;margin-top:6px;"><br>` +
+      `<a class="photo-download" href="${url}?download=1" download>⬇ Download photo</a>`
     );
     marker.addTo(liveLayer);
     entry.photoMarkers.push({ photoId: p.id, marker });
@@ -442,6 +443,7 @@ async function showPhotoGallery(token, sessionName) {
       <figure class="photo-item">
         <img src="/api/sessions/${encodeURIComponent(token)}/media/${photo.id}" alt="Camera capture" loading="lazy">
         <figcaption>${esc(fmtTime(photo.created_at))}</figcaption>
+        <a class="photo-download" href="/api/sessions/${encodeURIComponent(token)}/media/${photo.id}?download=1" download>⬇ Download</a>
       </figure>`).join('');
   } catch (err) {
     gallery.textContent = `Could not load photos: ${err.message}`;

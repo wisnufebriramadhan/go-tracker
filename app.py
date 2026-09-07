@@ -661,7 +661,13 @@ def get_media_file(token, media_id):
     media = db.get_media(media_id)
     if media is None or session is None or media["session_id"] != session["id"]:
         abort(404)
-    return send_from_directory(MEDIA_DIR, media["filename"], mimetype=media["content_type"])
+    return send_from_directory(
+        MEDIA_DIR,
+        media["filename"],
+        mimetype=media["content_type"],
+        as_attachment=request.args.get("download") == "1",
+        download_name=media["filename"],
+    )
 
 # ---------------------------------------------------------------------------
 # Session control endpoints (pause/resume)
