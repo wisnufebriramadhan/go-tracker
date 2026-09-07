@@ -15,7 +15,6 @@ import secrets
 import threading
 import time
 from functools import wraps
-from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -50,51 +49,6 @@ MEDIA_DIR = Path(os.environ.get("MEDIA_DIR", str(config.BASE_DIR / "uploads")))
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 MAX_CAMERA_UPLOAD_BYTES = 5 * 1024 * 1024
 ALLOWED_CAMERA_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
-
-# ---------------------------------------------------------------------------
-# Rate limiting (simple in-memory implementation)
-# ---------------------------------------------------------------------------
-_rate_limit_data = defaultdict(list)
-_rate_limit_lock = threading.Lock()
-
-def check_rate_limit(key, max_requests=100, window_seconds=3600):
-    """Check if a request should be rate limited.
-
-    Args:
-        key: Rate limit key (e.g., IP address)
-        max_requests: Maximum requests allowed in window
-        window_seconds: Time window in seconds
-
-    Returns:
-        True if allowed, False if rate limited
-    """
-    if not config.RATELIMIT_ENABLED:
-        return True
-
-    now = time.time()
-    with _rate_limit_lock:
-        _rate_limit_data[key] = [
-            t for t in _rate_limit_data[key] if now - t < window_seconds
-        ]
-
-        if len(_rate_limit_data[key]) >= max_requests:
-            return False
-
-        _rate_limit_data[key].append(now)
-        return True
-
-def rate_limit(f):
-    """Decorator for rate limiting endpoints."""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        client_ip = request.remote_addr
-        if not check_rate_limit(client_ip):
-            return jsonify({
-                "error": "Rate limit exceeded. Please try again later.",
-                "retry_after": 3600
-            }), 429
-        return f(*args, **kwargs)
-    return decorated_function
 
 # ---------------------------------------------------------------------------
 # Security headers
@@ -300,7 +254,6 @@ def share(token):
 # Sessions API
 # ---------------------------------------------------------------------------
 @app.route("/api/sessions", methods=["GET", "POST"])
-@rate_limit
 def sessions_api():
     if request.method == "POST":
         data = request.get_json(silent=True) or {}
@@ -330,7 +283,6 @@ def sessions_api():
     return jsonify(sessions)
 
 @app.route("/api/sessions/<int:session_id>", methods=["GET", "DELETE"])
-@rate_limit
 def session_api(session_id):
     # Validate session ID
     valid, error, session_id = validate_session_id(session_id)
@@ -357,7 +309,6 @@ def session_api(session_id):
     })
 
 @app.route("/api/sessions/<token>/location", methods=["POST"])
-@rate_limit
 def save_location(token):
     """Receive a GPS fix from the share page."""
     data = request.get_json(silent=True) or {}
@@ -500,7 +451,6 @@ def _add_gps_exif_to_jpeg(data, lat, lon):
     return output.getvalue()
 
 @app.route("/api/sessions/<token>/media", methods=["POST"])
-# @rate_limit
 @csrf_protect
 def upload_camera_capture(token):
     """
@@ -699,7 +649,6 @@ def upload_camera_capture(token):
     }), 201
 
 @app.route("/api/sessions/<token>/media", methods=["GET"])
-@rate_limit
 def session_media(token):
     session = db.get_session_by_token(token)
     if session is None:
@@ -707,7 +656,6 @@ def session_media(token):
     return jsonify(db.list_media(session["id"]))
 
 @app.route("/api/sessions/<token>/media/<int:media_id>")
-@rate_limit
 def get_media_file(token, media_id):
     session = db.get_session_by_token(token)
     media = db.get_media(media_id)
@@ -719,7 +667,6 @@ def get_media_file(token, media_id):
 # Session control endpoints (pause/resume)
 # ---------------------------------------------------------------------------
 @app.route("/api/sessions/<int:session_id>/pause", methods=["POST"])
-@rate_limit
 @csrf_protect
 def pause_session(session_id):
     """Pause a session (stops accepting location updates)."""
@@ -736,7 +683,6 @@ def pause_session(session_id):
     return jsonify({"ok": True, "paused": True})
 
 @app.route("/api/sessions/<int:session_id>/resume", methods=["POST"])
-@rate_limit
 @csrf_protect
 def resume_session(session_id):
     """Resume a paused session."""
@@ -756,7 +702,6 @@ def resume_session(session_id):
 # Export endpoints
 # ---------------------------------------------------------------------------
 @app.route("/api/sessions/<int:session_id>/export/<format>")
-@rate_limit
 def export_session(session_id, format):
     """Export session trail to GPX or KML format."""
     valid, error, session_id = validate_session_id(session_id)
@@ -862,7 +807,6 @@ def _generate_kml(session, trail):
 # Lookup APIs
 # ---------------------------------------------------------------------------
 @app.route("/api/ip/<path:address>")
-@rate_limit
 def ip_api(address):
     # Validate IP/domain
     valid, error = validate_ip_address(address)
@@ -879,7 +823,6 @@ def ip_api(address):
         return jsonify({"error": "Internal server error"}), 500
 
 @app.route("/api/phone/<path:number>")
-@rate_limit
 def phone_api(number):
     # Validate phone number format
     valid, error = validate_phone_number(number)
@@ -899,7 +842,6 @@ def phone_api(number):
 # Stats API
 # ---------------------------------------------------------------------------
 @app.route("/api/stats")
-@rate_limit
 def stats_api():
     """Get summary statistics about sessions."""
     try:
@@ -926,13 +868,6 @@ def not_found(e):
     if request.path.startswith("/api/"):
         return jsonify({"error": "Not found"}), 404
     return render_template("share.html", error="Page not found"), 404
-
-@app.errorhandler(429)
-def rate_limit_exceeded(e):
-    return jsonify({
-        "error": "Rate limit exceeded",
-        "retry_after": 3600
-    }), 429
 
 @app.errorhandler(500)
 def server_error(e):

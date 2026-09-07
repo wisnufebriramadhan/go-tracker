@@ -28,10 +28,6 @@ class Config:
     SESSION_STALE_AFTER = int(os.environ.get("SESSION_STALE_AFTER", 120))  # seconds
     SESSION_AUTO_DELETE_HOURS = int(os.environ.get("SESSION_AUTO_DELETE_HOURS", 0))  # 0 = disabled
 
-    # Rate limiting
-    RATELIMIT_ENABLED = os.environ.get("RATELIMIT_ENABLED", "true").lower() == "true"
-    RATELIMIT_DEFAULT = os.environ.get("RATELIMIT_DEFAULT", "100/hour")
-
     # Dashboard login
     ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
     ADMIN_PASS = os.environ.get("ADMIN_PASS", "admin123")
