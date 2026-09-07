@@ -26,4 +26,4 @@ deployer ALL=(root) NOPASSWD: /usr/local/sbin/deploy-go-tracker
 SUDOERS
 
 systemctl daemon-reload
-sudo -u "$DEPLOY_USER" /usr/local/sbin/deploy-go-tracker
+/usr/local/sbin/deploy-go-tracker
