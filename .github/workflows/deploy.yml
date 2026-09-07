@@ -19,12 +19,14 @@ jobs:
       - name: Configure SSH
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
-          test -n "$DEPLOY_HOST"
-          test -n "$DEPLOY_KNOWN_HOSTS"
-          test -n "$DEPLOY_SSH_KEY"
+          : "${DEPLOY_HOST:?Missing repository secret DEPLOY_HOST}"
+          : "${DEPLOY_USER:?Missing repository secret DEPLOY_USER}"
+          : "${DEPLOY_KNOWN_HOSTS:?Missing repository secret DEPLOY_KNOWN_HOSTS}"
+          : "${DEPLOY_SSH_KEY:?Missing repository secret DEPLOY_SSH_KEY}"
           install -d -m 700 ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key

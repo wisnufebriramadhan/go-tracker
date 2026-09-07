@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Installed on the server as /usr/local/sbin/deploy-go-tracker.
+# This script deliberately deploys only the tracked main branch, while retaining
+# /opt/go-tracker/.env and /opt/go-tracker/data outside the Git worktree.
+set -Eeuo pipefail
+
+readonly APP_DIR=/opt/go-tracker/app
+readonly VENV_DIR=/opt/go-tracker/venv
+readonly SERVICE=go-tracker.service
+readonly DEPLOY_USER=deployer
+
+cd "$APP_DIR"
+runuser -u "$DEPLOY_USER" -- git fetch --prune origin main
+runuser -u "$DEPLOY_USER" -- git reset --hard origin/main
+
+if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+  runuser -u "$DEPLOY_USER" -- python3 -m venv "$VENV_DIR"
+fi
+
+runuser -u "$DEPLOY_USER" -- "$VENV_DIR/bin/pip" install --disable-pip-version-check --requirement requirements.txt
+sudo systemctl restart "$SERVICE"
+sudo systemctl is-active --quiet "$SERVICE"

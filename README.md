@@ -34,6 +34,39 @@ Open **http://127.0.0.1:5000** — you'll see the dashboard. Create a share link
 pytest -q
 ```
 
+## Automatic deployment (GitHub Actions)
+
+Every push to `main` deploys over SSH. The current failures stop in **Configure
+SSH**, which means a required GitHub Actions secret has not been set (the server
+has not been contacted yet).
+
+On the Ubuntu server, run the one-time bootstrap as root (first review the
+repository URL in the script):
+
+```bash
+git clone https://github.com/wisnufebriramadhan/go-tracker.git /tmp/go-tracker
+sudo /tmp/go-tracker/deploy/bootstrap-server.sh
+sudoedit /opt/go-tracker/.env
+```
+
+Set a real `SECRET_KEY` in `/opt/go-tracker/.env`. Then add these repository
+secrets in **GitHub → Settings → Secrets and variables → Actions**:
+
+| Secret | Value |
+|---|---|
+| `DEPLOY_HOST` | Server IP address or DNS name |
+| `DEPLOY_USER` | `deployer` (or the SSH user configured on the server) |
+| `DEPLOY_SSH_KEY` | Private key for that user, including its header/footer |
+| `DEPLOY_KNOWN_HOSTS` | Output of `ssh-keyscan -H <server-host>` run from a trusted machine |
+
+Add the matching public key to `/home/deployer/.ssh/authorized_keys` on the
+server (for example, generate it locally with `ssh-keygen -t ed25519 -f
+go-tracker-deploy -C go-tracker-deploy`). The user may run only
+`/usr/local/sbin/deploy-go-tracker` with `sudo`.
+After committing this setup, use **Actions → Deploy → Run workflow**, or push
+to `main`. The workflow now reports the exact missing secret instead of an
+unexplained exit code.
+
 ## Testing from a real phone (HTTPS required)
 
 Browsers **only allow GPS access on secure (HTTPS) contexts** or `localhost`. Testing on the same computer works out of the box, but a phone on your LAN needs HTTPS. The easiest way is a free [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/):
