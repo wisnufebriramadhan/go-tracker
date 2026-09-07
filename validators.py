@@ -149,9 +149,6 @@ def validate_accuracy(accuracy: Optional[float]) -> Tuple[bool, Optional[str]]:
     if accuracy < 0:
         return False, "Accuracy cannot be negative"
 
-    if accuracy > 100000:  # 100km seems reasonable max
-        return False, "Accuracy value seems unreasonably high"
-
     return True, None
 
 

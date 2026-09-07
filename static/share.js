@@ -116,7 +116,7 @@
    * =========================================================
    */
 
-  function sendFix() {
+  async function sendFix() {
     if (!lastFix) {
       return;
     }
@@ -160,8 +160,9 @@
         encodeURIComponent(token)
       );
 
-    fetch(url, {
-      method: "POST",
+    try {
+      const response = await fetch(url, {
+        method: "POST",
 
       headers: {
         "Content-Type":
@@ -174,14 +175,24 @@
       body:
         JSON.stringify(payload),
 
-      keepalive:
-        true,
-    }).catch((err) => {
+        keepalive:
+          true,
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || `Server returned ${response.status}`);
+      }
+    } catch (err) {
       console.warn(
         "Failed to send location:",
         err
       );
-    });
+      setStatus(
+        `⚠️ Location could not be saved: ${err.message}`,
+        "err"
+      );
+    }
   }
 
   /*

@@ -163,6 +163,6 @@
     window.CSRF_TOKEN = {{ csrf_token | tojson if csrf_token else 'null' }};
     window.SESSION_PAUSED = {{ session.paused | tojson if session else 'false' }};
   </script>
-  <script src="{{ url_for('static', filename='share.js') }}?v=3"></script>
+  <script src="{{ url_for('static', filename='share.js') }}?v=4"></script>
 </body>
 </html>

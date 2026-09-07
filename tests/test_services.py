@@ -121,6 +121,11 @@ class TestValidators:
         valid, error = validate_accuracy(None)
         assert valid is True
 
+    def test_validate_accuracy_large_value(self):
+        valid, error = validate_accuracy(1_574_700)
+        assert valid is True
+        assert error is None
+
     def test_validate_accuracy_negative(self):
         valid, error = validate_accuracy(-5)
         assert valid is False
