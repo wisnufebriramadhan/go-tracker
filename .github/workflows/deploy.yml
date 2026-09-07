@@ -59,4 +59,4 @@ jobs:
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             "$DEPLOY_USER@$DEPLOY_HOST" \
-            '/opt/go-tracker/venv/bin/pip install --disable-pip-version-check --requirement /opt/go-tracker/app/requirements.txt && sudo systemctl restart go-tracker && sudo systemctl is-active --quiet go-tracker'
+            'sudo -n -u deployer /opt/go-tracker/venv/bin/pip install --disable-pip-version-check --requirement /opt/go-tracker/app/requirements.txt && sudo -n systemctl restart go-tracker && sudo -n systemctl is-active --quiet go-tracker'
