@@ -11,6 +11,7 @@ apt-get install --yes git python3 python3-venv python3-pip
 id -u "$DEPLOY_USER" >/dev/null 2>&1 || useradd --create-home --shell /bin/bash "$DEPLOY_USER"
 install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" "$APP_ROOT" "$APP_ROOT/data"
 chown www-data:www-data "$APP_ROOT/data"
+install -d -m 750 -o www-data -g www-data "$APP_ROOT/data/uploads"
 
 if [[ ! -d "$APP_ROOT/app/.git" ]]; then
   sudo -u "$DEPLOY_USER" git clone "$APP_REPOSITORY" "$APP_ROOT/app"
